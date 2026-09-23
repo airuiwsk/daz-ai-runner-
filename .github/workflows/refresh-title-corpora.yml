@@ -74,6 +74,14 @@ jobs:
               print(f"{key}: {len(titles)}")
           PY
 
+      - name: Prepare pilot title contexts
+        working-directory: daz-ai
+        run: |
+          python scripts/prepare_title_context.py \
+            books/B20260913-101 \
+            books/B20260913-102 \
+            books/B20260913-103
+
       - name: Commit corpora to private repository
         working-directory: daz-ai
         shell: bash
@@ -81,7 +89,7 @@ jobs:
           set -euo pipefail
           git config user.name "kindle-title-corpus-bot"
           git config user.email "kindle-title-corpus-bot@users.noreply.github.com"
-          git add research/title-corpus/*.json
+          git add research/title-corpus/*.json books/*/publish/title-context.json
           if git diff --cached --quiet; then
             echo "No corpus changes."
           else
