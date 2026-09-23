@@ -2,8 +2,11 @@ name: Gemini Japanese Naturalization Runner
 
 on:
   schedule:
-    # 16:10 JST = 07:10 UTC. Avoid the top of the hour where scheduled runs may be delayed.
-    - cron: "10 7 * * *"
+    # 16:10 / 16:30 / 16:50 JST = 07:10 / 07:30 / 07:50 UTC.
+    # One pilot per run keeps failures isolated while staying well inside the daily free quota.
+    - cron: "10 7 * * *" # B20260913-101
+    - cron: "30 7 * * *" # B20260913-102
+    - cron: "50 7 * * *" # B20260913-103
   workflow_dispatch:
     inputs:
       book_id:
@@ -20,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: gemini-naturalize-${{ github.event_name == 'workflow_dispatch' && inputs.book_id || 'B20260913-101' }}
+  group: gemini-naturalize-${{ github.event_name }}-${{ github.event.schedule || inputs.book_id || 'manual' }}
   cancel-in-progress: false
 
 jobs:
@@ -29,10 +32,32 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - name: Resolve book id
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_BOOK_ID: ${{ inputs.book_id }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            BOOK_ID="$INPUT_BOOK_ID"
+          else
+            case "$SCHEDULE" in
+              "10 7 * * *") BOOK_ID="B20260913-101" ;;
+              "30 7 * * *") BOOK_ID="B20260913-102" ;;
+              "50 7 * * *") BOOK_ID="B20260913-103" ;;
+              *) echo "Unknown schedule: $SCHEDULE"; exit 2 ;;
+            esac
+          fi
+          echo "book_id=$BOOK_ID" >> "$GITHUB_OUTPUT"
+          echo "Resolved book: $BOOK_ID"
+
       - name: Validate input
         shell: bash
         env:
-          BOOK_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.book_id || 'B20260913-101' }}
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
         run: |
           set -euo pipefail
           if [[ ! "$BOOK_ID" =~ ^B[0-9]{8}-[0-9]{3}$ ]]; then
@@ -81,7 +106,7 @@ jobs:
         shell: bash
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          BOOK_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.book_id || 'B20260913-101' }}
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
           FORCE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.force || 'false' }}
         run: |
           set +e
@@ -98,7 +123,7 @@ jobs:
         working-directory: daz-ai
         shell: bash
         env:
-          BOOK_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.book_id || 'B20260913-101' }}
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
         run: |
           set -euo pipefail
           git config user.name "kindle-factory-bot"
@@ -123,7 +148,7 @@ jobs:
         shell: bash
         env:
           EXIT_CODE: ${{ steps.naturalize.outputs.exit_code }}
-          BOOK_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.book_id || 'B20260913-101' }}
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
         run: |
           set -euo pipefail
           if [ "$EXIT_CODE" != "0" ]; then
