@@ -1,7 +1,7 @@
 # Private Kindle Factory Validation
 
 - Status: **PASS**
-- Private repo SHA: `6db0c7ef854d7e9a6e611a80b5b19838566365a1`
+- Private repo SHA: `d7e5be64b439557ed3fbd9ff5e30483b6484bf15`
 - Checked: compileall + genre router + selection + naturalizer ordering + genre-aware QA smoke
 
 ## Log
@@ -10,9 +10,9 @@
 ## compileall
 
 ## targeted unit tests
-.......................
+..............................................
 ----------------------------------------------------------------------
-Ran 23 tests in 0.214s
+Ran 46 tests in 0.257s
 
 OK
 CLAIMED_ID=B20260913-001
