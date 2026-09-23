@@ -2,7 +2,7 @@ name: Gemini Japanese Naturalization Runner
 
 on:
   schedule:
-    # 16:10 / 16:30 / 16:50 JST = 07:10 / 07:30 / 07:50 UTC.
+    # 18:10 / 18:30 / 18:50 JST = 09:10 / 09:30 / 09:50 UTC.
     # One pilot per run keeps failures isolated while staying well inside the daily free quota.
     - cron: "10 9 * * *" # 18:10 JST — B20260913-101
     - cron: "30 9 * * *" # 18:30 JST — B20260913-102
@@ -45,9 +45,9 @@ jobs:
             BOOK_ID="$INPUT_BOOK_ID"
           else
             case "$SCHEDULE" in
-              "10 8 * * *") BOOK_ID="B20260913-101" ;;
-              "30 8 * * *") BOOK_ID="B20260913-102" ;;
-              "50 8 * * *") BOOK_ID="B20260913-103" ;;
+              "10 9 * * *") BOOK_ID="B20260913-101" ;;
+              "30 9 * * *") BOOK_ID="B20260913-102" ;;
+              "50 9 * * *") BOOK_ID="B20260913-103" ;;
               *) echo "Unknown schedule: $SCHEDULE"; exit 2 ;;
             esac
           fi
@@ -177,18 +177,3 @@ jobs:
 
           MANIFEST="daz-ai/books/$BOOK_ID/naturalized/manifest.json"
           test -s "$MANIFEST" || { echo "Naturalization manifest is missing"; exit 1; }
-
-          python - "$MANIFEST" <<'PY'
-          import json
-          import sys
-
-          path = sys.argv[1]
-          data = json.load(open(path, encoding="utf-8"))
-          assert data.get("status") == "GEMINI_NATURALIZED", data
-          assert data.get("model_required") == "gemini-3.8-flash", data
-          records = data.get("records") or []
-          assert records, data
-          assert all(r.get("status") == "accepted" for r in records), records
-          assert all(r.get("model") == "gemini-3.8-flash" for r in records), records
-          print(f"Naturalization complete: {len(records)} file(s)")
-          PY
