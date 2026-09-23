@@ -1,75 +1,72 @@
-# daz-ai public runner template
+# daz-ai public runner setup
 
-This directory contains the exact files to place in a **public** repository named `daz-ai-runner-`.
+This public repository is an execution shell for the private Kindle Factory repository `airuiwsk/daz-ai`.
 
-The public repository is only an execution shell. It must never contain manuscript text, generated manuscript output, API keys, or PAT values.
+It must never contain manuscript text, generated manuscript output, API keys, or PAT values.
 
-## Why this works
+## Required files
 
-GitHub standard hosted runners are free for public repositories. The public workflow uses a fine-grained PAT to check out the private `airuiwsk/daz-ai` repository, runs the existing naturalizer there, then commits only `books/<book_id>/naturalized/` back to the private repository.
-
-## Public repository contents
-
-Copy `naturalize.yml` to:
-
-```
+```text
 .github/workflows/naturalize.yml
+.github/workflows/validate-private.yml
+README.md
+SETUP.md
+validation/latest.md      # generated validation result only
 ```
-
-A short public README is sufficient. Do not copy manuscripts or the private repository into the public repository.
 
 ## Required Actions secrets
 
-Create exactly these two repository secrets in the public repository:
-
 ### GEMINI_API_KEY
-
-The Gemini API key from Google AI Studio.
+Gemini API key used only by the Naturalization workflow.
 
 ### DAZ_AI_PAT
-
-Use a **fine-grained personal access token**, limited to only:
+Fine-grained personal access token limited to:
 
 - Repository access: `airuiwsk/daz-ai`
-- Repository permission: **Contents — Read and write**
-- Metadata read access is implicit/required by GitHub
+- Contents: Read and write
+- Metadata: required implicit read access
 
-Do not grant administration, issues, actions, packages, or organization-wide access.
+Do not grant administration, issues, packages, organization-wide, or unrelated repository access.
+
+## Scheduled Naturalization
+
+The production workflow runs:
+
+- 16:10 JST → `B20260913-101`
+- 16:30 JST → `B20260913-102`
+- 16:50 JST → `B20260913-103`
+
+Each run uses resume behavior. Accepted files with an unchanged source hash are skipped, so completed books become effectively no-op runs.
+
+A manual `workflow_dispatch` remains available. Use `force=false` unless intentionally re-naturalizing unchanged source.
+
+## Validation workflow
+
+`Validate Private Kindle Factory` checks the current private `main` branch using the existing `DAZ_AI_PAT`.
+
+It performs compile checks, targeted unit tests, and a genre-aware QA smoke test. The result written to `validation/latest.md` contains only test logs and the tested private commit SHA.
+
+The validation workflow does **not** call Gemini and does **not** publish private manuscript content.
 
 ## Security rules
 
-- Workflow trigger is `workflow_dispatch` only.
-- Do not add `pull_request_target`.
-- Do not print secrets.
-- Do not upload manuscript artifacts.
-- Do not commit manuscript contents to this public repository.
-- Keep `permissions: contents: read` for the public repository's own `GITHUB_TOKEN`.
-- The private-repo PAT exists only as an Actions secret.
-- Delete/rotate `DAZ_AI_PAT` immediately if the public workflow is modified by an untrusted party.
+- Never add manuscript text or Gemini output to this public repository.
+- Never print or commit secrets.
+- Never add `pull_request_target`.
+- Naturalization workflow keeps its own `GITHUB_TOKEN` at `contents: read`.
+- Validation uses `contents: write` only to commit `validation/latest.md`.
+- The private PAT remains an Actions secret and is limited to `airuiwsk/daz-ai`.
+- Rotate `DAZ_AI_PAT` immediately if workflow integrity is compromised.
 
-## First run
+## Manual recovery
 
-Actions -> Gemini Japanese Naturalization Runner -> Run workflow
+Actions → Gemini Japanese Naturalization Runner → Run workflow
 
-Use:
+Example:
 
-```
+```text
 book_id: B20260913-101
 force: false
 ```
 
-On success, the private repository receives:
-
-```
-books/B20260913-101/naturalized/
-  chapter1.md
-  chapter1.md.naturalization.json
-  ...
-  manifest.json
-```
-
-The public repository receives no manuscript files.
-
-## Resume behavior
-
-If Gemini quota/error stops halfway, successful files are committed to the private repository. Re-run with `force=false`; files whose source hash is unchanged and already accepted are skipped.
+If Gemini quota/error stops midway, accepted checkpoint files are committed to the private repository. A later `force=false` run skips those accepted files and continues the remaining sources.
