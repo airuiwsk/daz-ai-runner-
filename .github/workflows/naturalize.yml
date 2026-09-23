@@ -4,9 +4,9 @@ on:
   schedule:
     # 16:10 / 16:30 / 16:50 JST = 07:10 / 07:30 / 07:50 UTC.
     # One pilot per run keeps failures isolated while staying well inside the daily free quota.
-    - cron: "10 8 * * *" # 17:10 JST — B20260913-101
-    - cron: "30 8 * * *" # 17:30 JST — B20260913-102
-    - cron: "50 8 * * *" # 17:50 JST — B20260913-103
+    - cron: "10 9 * * *" # 18:10 JST — B20260913-101
+    - cron: "30 9 * * *" # 18:30 JST — B20260913-102
+    - cron: "50 9 * * *" # 18:50 JST — B20260913-103
   workflow_dispatch:
     inputs:
       book_id:
