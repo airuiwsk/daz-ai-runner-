@@ -71,7 +71,8 @@ jobs:
             python -m unittest \
               tests.test_genre_router \
               tests.test_selection \
-              tests.test_naturalize_manuscript
+              tests.test_naturalize_manuscript \
+              tests.test_quality_and_package
             C2=$?
 
             echo
