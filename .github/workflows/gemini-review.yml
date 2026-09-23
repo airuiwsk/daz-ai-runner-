@@ -1,0 +1,113 @@
+name: Gemini Independent Review Runner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/gemini-review.yml"
+      - "review/trigger.txt"
+  workflow_dispatch:
+    inputs:
+      book_id:
+        description: "Book ID, or ALL"
+        required: false
+        default: "ALL"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gemini-independent-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Verify required secrets
+        shell: bash
+        env:
+          DAZ_AI_PAT: ${{ secrets.DAZ_AI_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DAZ_AI_PAT"
+          test -n "$GEMINI_API_KEY"
+
+      - name: Checkout private Kindle Factory
+        uses: actions/checkout@v7
+        with:
+          repository: airuiwsk/daz-ai
+          ref: main
+          token: ${{ secrets.DAZ_AI_PAT }}
+          path: daz-ai
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: daz-ai/requirements.txt
+
+      - name: Install dependencies
+        working-directory: daz-ai
+        run: pip install -r requirements.txt
+
+      - name: Run independent reviews
+        id: review
+        working-directory: daz-ai
+        shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          INPUT_BOOK_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.book_id || 'ALL' }}
+        run: |
+          set +e
+          CODE=0
+          if [ "$INPUT_BOOK_ID" = "ALL" ] || [ -z "$INPUT_BOOK_ID" ]; then
+            BOOKS="B20260913-101 B20260913-102 B20260913-103"
+          else
+            BOOKS="$INPUT_BOOK_ID"
+          fi
+
+          for BOOK_ID in $BOOKS; do
+            echo "=== Gemini independent review: $BOOK_ID ==="
+            python -m src.kindle_factory.gemini_review_manuscript "books/$BOOK_ID"
+            RC=$?
+            if [ "$RC" -ne 0 ]; then
+              CODE=$RC
+              break
+            fi
+          done
+
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Persist review outputs
+        working-directory: daz-ai
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kindle-factory-reviewer"
+          git config user.email "kindle-factory-reviewer@users.noreply.github.com"
+          git add books/*/gemini-review.md books/*/gemini-review.json 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No review changes to commit."
+          else
+            git commit -m "Add Gemini independent manuscript reviews"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Enforce review result
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.review.outputs.exit_code }}
+        run: |
+          if [ "$EXIT_CODE" != "0" ]; then
+            exit "$EXIT_CODE"
+          fi
