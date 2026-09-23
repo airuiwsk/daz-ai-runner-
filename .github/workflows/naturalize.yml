@@ -1,0 +1,148 @@
+name: Gemini Japanese Naturalization Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      book_id:
+        description: "Book ID in private airuiwsk/daz-ai"
+        required: true
+        type: string
+      force:
+        description: "Re-run files even when the source hash is unchanged"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gemini-naturalize-${{ inputs.book_id }}
+  cancel-in-progress: false
+
+jobs:
+  naturalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Validate input
+        shell: bash
+        env:
+          BOOK_ID: ${{ inputs.book_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BOOK_ID" =~ ^B[0-9]{8}-[0-9]{3}$ ]]; then
+            echo "Invalid book_id format"
+            exit 2
+          fi
+
+      - name: Verify required secrets
+        shell: bash
+        env:
+          DAZ_AI_PAT: ${{ secrets.DAZ_AI_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DAZ_AI_PAT" || { echo "DAZ_AI_PAT is missing"; exit 1; }
+          test -n "$GEMINI_API_KEY" || { echo "GEMINI_API_KEY is missing"; exit 1; }
+
+      - name: Checkout private manuscript repository
+        uses: actions/checkout@v7
+        with:
+          repository: airuiwsk/daz-ai
+          ref: main
+          token: ${{ secrets.DAZ_AI_PAT }}
+          path: daz-ai
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: daz-ai/requirements.txt
+
+      - name: Install dependencies
+        working-directory: daz-ai
+        run: pip install -r requirements.txt
+
+      - name: Run safety tests before API use
+        working-directory: daz-ai
+        run: python -m unittest tests.test_naturalize_manuscript tests.test_gemini_client
+
+      - name: Naturalize with Gemini 3.8 Flash
+        id: naturalize
+        working-directory: daz-ai
+        shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          BOOK_ID: ${{ inputs.book_id }}
+          FORCE_RUN: ${{ inputs.force }}
+        run: |
+          set +e
+          FORCE_ARG=""
+          if [ "$FORCE_RUN" = "true" ]; then
+            FORCE_ARG="--force"
+          fi
+          python -m src.kindle_factory.naturalize_manuscript "books/$BOOK_ID" $FORCE_ARG
+          CODE=$?
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Persist checkpoint to private repository
+        working-directory: daz-ai
+        shell: bash
+        env:
+          BOOK_ID: ${{ inputs.book_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "kindle-factory-bot"
+          git config user.email "kindle-factory-bot@users.noreply.github.com"
+
+          if [ ! -d "books/$BOOK_ID/naturalized" ]; then
+            echo "No naturalization output directory was produced."
+            exit 0
+          fi
+
+          git add "books/$BOOK_ID/naturalized"
+          if git diff --cached --quiet; then
+            echo "No checkpoint changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Naturalize Japanese for $BOOK_ID with Gemini 3.8 Flash"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Verify successful completion
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.naturalize.outputs.exit_code }}
+          BOOK_ID: ${{ inputs.book_id }}
+        run: |
+          set -euo pipefail
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Naturalization stopped with exit code $EXIT_CODE."
+            echo "Any accepted checkpoint was already written back to the private repository."
+            exit "$EXIT_CODE"
+          fi
+
+          MANIFEST="daz-ai/books/$BOOK_ID/naturalized/manifest.json"
+          test -s "$MANIFEST" || { echo "Naturalization manifest is missing"; exit 1; }
+
+          python - "$MANIFEST" <<'PY'
+          import json
+          import sys
+
+          path = sys.argv[1]
+          data = json.load(open(path, encoding="utf-8"))
+          assert data.get("status") == "GEMINI_NATURALIZED", data
+          assert data.get("model_required") == "gemini-3.8-flash", data
+          records = data.get("records") or []
+          assert records, data
+          assert all(r.get("status") == "accepted" for r in records), records
+          assert all(r.get("model") == "gemini-3.8-flash" for r in records), records
+          print(f"Naturalization complete: {len(records)} file(s)")
+          PY
