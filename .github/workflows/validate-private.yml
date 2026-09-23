@@ -1,0 +1,168 @@
+name: Validate Private Kindle Factory
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/validate-private.yml"
+      - "validation/trigger.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: validate-private-kindle-factory
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout runner repository
+        uses: actions/checkout@v7
+        with:
+          path: runner
+
+      - name: Verify private-repo token
+        shell: bash
+        env:
+          DAZ_AI_PAT: \${{ secrets.DAZ_AI_PAT }}
+        run: |
+          set -euo pipefail
+          test -n "$DAZ_AI_PAT" || { echo "DAZ_AI_PAT is missing"; exit 1; }
+
+      - name: Checkout private Kindle Factory
+        uses: actions/checkout@v7
+        with:
+          repository: airuiwsk/daz-ai
+          ref: main
+          token: \${{ secrets.DAZ_AI_PAT }}
+          path: daz-ai
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: daz-ai/requirements.txt
+
+      - name: Install dependencies
+        working-directory: daz-ai
+        run: pip install -r requirements.txt
+
+      - name: Run targeted validation
+        id: tests
+        working-directory: daz-ai
+        shell: bash
+        run: |
+          set +e
+          {
+            echo "## compileall"
+            python -m compileall -q src tests
+            C1=$?
+
+            echo
+            echo "## targeted unit tests"
+            python -m unittest \
+              tests.test_genre_router \
+              tests.test_selection \
+              tests.test_naturalize_manuscript
+            C2=$?
+
+            echo
+            echo "## genre-aware QA smoke"
+            python - <<'PY'
+          from pathlib import Path
+          from src.kindle_factory.genre_router import resolve_genre_route, skill_paths_for_route
+          from src.kindle_factory.planning_pipeline import load_writing_skills
+          from src.kindle_factory.qa_pipeline import genre_quality_context
+
+          expected = {
+              "nonfiction": "business",
+              "essay": "essay",
+              "fictional_diary": "fictional_diary",
+              "fiction": "fiction",
+          }
+          for content_type, route in expected.items():
+              assert resolve_genre_route({"content_type": content_type}) == route
+              loaded = load_writing_skills(route)
+              assert loaded, route
+              assert all(item["content"].strip() for item in loaded), route
+
+          fiction_paths = skill_paths_for_route("fiction")
+          assert "skills/fiction-writing/SKILL.md" in fiction_paths
+          assert "skills/story-scene/SKILL.md" in fiction_paths
+
+          context = genre_quality_context(Path("/tmp/no-style-profile"), {"content_type": "fiction"})
+          assert context["genre_route"] == "fiction"
+          assert any(item["path"] == "skills/story-scene/SKILL.md" for item in context["writing_skills"])
+          print("genre-aware QA smoke: PASS")
+          PY
+            C3=$?
+
+            if [ "$C1" -eq 0 ] && [ "$C2" -eq 0 ] && [ "$C3" -eq 0 ]; then
+              CODE=0
+            else
+              CODE=1
+            fi
+            echo
+            echo "compileall=$C1 unit_tests=$C2 qa_smoke=$C3"
+          } > ../validation.log 2>&1
+
+          cat ../validation.log
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Write validation result
+        shell: bash
+        env:
+          EXIT_CODE: \${{ steps.tests.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          PRIVATE_SHA="$(git -C daz-ai rev-parse HEAD)"
+          STATUS="PASS"
+          if [ "$EXIT_CODE" != "0" ]; then STATUS="FAIL"; fi
+
+          mkdir -p runner/validation
+          {
+            echo "# Private Kindle Factory Validation"
+            echo
+            echo "- Status: **$STATUS**"
+            echo "- Private repo SHA: \`$PRIVATE_SHA\`"
+            echo "- Checked: compileall + genre router + selection + naturalizer ordering + genre-aware QA smoke"
+            echo
+            echo "## Log"
+            echo
+            echo '~~~text'
+            tail -n 120 validation.log
+            echo '~~~'
+          } > runner/validation/latest.md
+
+      - name: Commit validation result
+        working-directory: runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kindle-factory-validator"
+          git config user.email "kindle-factory-validator@users.noreply.github.com"
+          git add validation/latest.md
+          if git diff --cached --quiet; then
+            echo "No validation result changes."
+          else
+            git commit -m "Record private Kindle Factory validation"
+            git push origin HEAD:main
+          fi
+
+      - name: Enforce validation
+        shell: bash
+        env:
+          EXIT_CODE: \${{ steps.tests.outputs.exit_code }}
+        run: |
+          if [ "$EXIT_CODE" != "0" ]; then
+            exit "$EXIT_CODE"
+          fi
