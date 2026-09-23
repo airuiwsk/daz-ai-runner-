@@ -26,9 +26,15 @@ jobs:
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
+          PRIVATE_PAT: ${{ secrets.AI_ARBITRAGE_PAT }}
         shell: bash
         run: |
           set -euo pipefail
+          if [ -z "${PRIVATE_PAT:-}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "AI_ARBITRAGE_PAT is not configured; observer remains idle."
+            exit 0
+          fi
           body="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/arbitrage-observer.yml/runs?status=in_progress&per_page=100")"
           leader="$(printf '%s' "$body" | jq -r '[.workflow_runs[].id] | min')"
           if [ "$leader" != "$GITHUB_RUN_ID" ]; then
