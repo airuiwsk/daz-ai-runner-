@@ -98,7 +98,13 @@ jobs:
 
       - name: Run safety tests before API use
         working-directory: daz-ai
-        run: python -m unittest tests.test_naturalize_manuscript tests.test_gemini_client
+        run: |
+          python -m compileall -q src tests
+          python -m unittest \
+            tests.test_genre_router \
+            tests.test_selection \
+            tests.test_naturalize_manuscript \
+            tests.test_gemini_client
 
       - name: Naturalize with Gemini 3.8 Flash
         id: naturalize
