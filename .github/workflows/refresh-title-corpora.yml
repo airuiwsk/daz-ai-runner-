@@ -1,0 +1,91 @@
+name: Refresh Real Title Corpora
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/refresh-title-corpora.yml"
+      - "title-corpus/trigger.txt"
+  workflow_dispatch:
+  schedule:
+    - cron: "25 8 1 * *" # monthly, 17:25 JST on the 1st
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-real-title-corpora
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Verify private-repo token
+        shell: bash
+        env:
+          DAZ_AI_PAT: ${{ secrets.DAZ_AI_PAT }}
+        run: |
+          set -euo pipefail
+          test -n "$DAZ_AI_PAT"
+
+      - name: Checkout private Kindle Factory
+        uses: actions/checkout@v7
+        with:
+          repository: airuiwsk/daz-ai
+          ref: main
+          token: ${{ secrets.DAZ_AI_PAT }}
+          path: daz-ai
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Collect real title corpora
+        working-directory: daz-ai
+        run: python scripts/refresh_title_corpora.py
+
+      - name: Verify corpus sizes
+        working-directory: daz-ai
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("research/title-corpus")
+          expected = {
+              "business",
+              "lifestyle",
+              "mystery_sf_horror",
+              "light_literary",
+              "light_novel_fantasy",
+              "essay_diary",
+          }
+          for key in sorted(expected):
+              path = root / f"{key}.json"
+              data = json.loads(path.read_text(encoding="utf-8"))
+              titles = data["titles"]
+              assert 80 <= len(titles) <= 100, (key, len(titles))
+              assert len(titles) == len(set(titles)), key
+              print(f"{key}: {len(titles)}")
+          PY
+
+      - name: Commit corpora to private repository
+        working-directory: daz-ai
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kindle-title-corpus-bot"
+          git config user.email "kindle-title-corpus-bot@users.noreply.github.com"
+          git add research/title-corpus/*.json
+          if git diff --cached --quiet; then
+            echo "No corpus changes."
+          else
+            git commit -m "Refresh real title reference corpora"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
