@@ -76,6 +76,8 @@ jobs:
 
       - name: Prepare pilot title contexts
         working-directory: daz-ai
+        env:
+          PYTHONPATH: .
         run: |
           python scripts/prepare_title_context.py \
             books/B20260913-101 \
