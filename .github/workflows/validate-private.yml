@@ -29,7 +29,7 @@ jobs:
       - name: Verify private-repo token
         shell: bash
         env:
-          DAZ_AI_PAT: \${{ secrets.DAZ_AI_PAT }}
+          DAZ_AI_PAT: ${{ secrets.DAZ_AI_PAT }}
         run: |
           set -euo pipefail
           test -n "$DAZ_AI_PAT" || { echo "DAZ_AI_PAT is missing"; exit 1; }
@@ -39,7 +39,7 @@ jobs:
         with:
           repository: airuiwsk/daz-ai
           ref: main
-          token: \${{ secrets.DAZ_AI_PAT }}
+          token: ${{ secrets.DAZ_AI_PAT }}
           path: daz-ai
           fetch-depth: 1
           persist-credentials: false
@@ -121,7 +121,7 @@ jobs:
       - name: Write validation result
         shell: bash
         env:
-          EXIT_CODE: \${{ steps.tests.outputs.exit_code }}
+          EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
         run: |
           set -euo pipefail
           PRIVATE_SHA="$(git -C daz-ai rev-parse HEAD)"
@@ -161,7 +161,7 @@ jobs:
       - name: Enforce validation
         shell: bash
         env:
-          EXIT_CODE: \${{ steps.tests.outputs.exit_code }}
+          EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
         run: |
           if [ "$EXIT_CODE" != "0" ]; then
             exit "$EXIT_CODE"
