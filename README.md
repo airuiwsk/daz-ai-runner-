@@ -38,3 +38,17 @@ See [SETUP.md](SETUP.md) for the one-time setup.
 - Public-repo token permission: read only
 - Private PAT scope: only `airuiwsk/daz-ai`, Contents read/write
 - No manuscript artifacts are uploaded to this public repository
+
+
+## Automatic schedule
+
+The workflow runs automatically every day at **16:10 JST (07:10 UTC)**.
+
+Scheduled runs currently target:
+
+```
+B20260913-101
+force=false
+```
+
+Accepted files are skipped using source hashes, so completed chapters are not sent to Gemini again. Manual `Run workflow` remains available for debugging or another book ID.
