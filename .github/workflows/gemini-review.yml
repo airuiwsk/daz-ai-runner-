@@ -2,7 +2,7 @@ name: Gemini Independent Review Runner
 
 on:
   schedule:
-    - cron: "5 7 * * *" # 16:05 JST, just after Pacific-midnight daily quota reset
+    - cron: "5 8 * * *" # 17:05 JST, safely after Pacific-midnight daily quota reset year-round
   push:
     branches: [main]
     paths:
