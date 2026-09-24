@@ -71,7 +71,7 @@ jobs:
           set +e
           CODE=0
           if [ "$INPUT_BOOK_ID" = "ALL" ] || [ -z "$INPUT_BOOK_ID" ]; then
-            BOOKS="B20260913-101 B20260913-102 B20260913-103"
+            BOOKS="B20260913-101 B20260913-102 B20260913-103 B20260924-104"
           else
             BOOKS="$INPUT_BOOK_ID"
           fi
