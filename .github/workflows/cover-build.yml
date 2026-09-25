@@ -117,6 +117,7 @@ jobs:
         working-directory: daz-ai
         run: |
           python -m compileall -q src scripts tests
+          python scripts/check_cover_fonts.py
           python -m unittest tests.test_cover_art_prompt tests.test_cover_renderer
 
       - name: Select nearest professional cover references
