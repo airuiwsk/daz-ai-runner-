@@ -1,1 +1,1 @@
-B20260913-103 force=true redesign=speculative-corpus-v1
+B20260913-102 force=false redesign=full-design-features-v1
