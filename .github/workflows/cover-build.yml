@@ -1,0 +1,204 @@
+name: Gemini Cover Build Runner
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/cover-build.yml"
+      - "cover/trigger.txt"
+  workflow_dispatch:
+    inputs:
+      book_id:
+        description: "Book ID in private airuiwsk/daz-ai"
+        required: true
+        default: "B20260924-104"
+        type: string
+      force:
+        description: "Regenerate art even when prompt/model hash is unchanged"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gemini-cover-build
+  cancel-in-progress: false
+
+jobs:
+  cover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Resolve book id
+        id: resolve
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_BOOK_ID: ${{ inputs.book_id }}
+          INPUT_FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            BOOK_ID="$INPUT_BOOK_ID"
+            FORCE_RUN="$INPUT_FORCE"
+          else
+            BOOK_ID="B20260924-104"
+            FORCE_RUN="true"
+          fi
+          echo "book_id=$BOOK_ID" >> "$GITHUB_OUTPUT"
+          echo "force=$FORCE_RUN" >> "$GITHUB_OUTPUT"
+          echo "Resolved book: $BOOK_ID"
+
+      - name: Validate input
+        shell: bash
+        env:
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BOOK_ID" =~ ^B[0-9]{8}-[0-9]{3}$ ]]; then
+            echo "Invalid book_id format"
+            exit 2
+          fi
+
+      - name: Verify required secrets
+        shell: bash
+        env:
+          DAZ_AI_PAT: ${{ secrets.DAZ_AI_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DAZ_AI_PAT" || { echo "DAZ_AI_PAT is missing"; exit 1; }
+          test -n "$GEMINI_API_KEY" || { echo "GEMINI_API_KEY is missing"; exit 1; }
+
+      - name: Checkout private Kindle Factory
+        uses: actions/checkout@v7
+        with:
+          repository: airuiwsk/daz-ai
+          ref: main
+          token: ${{ secrets.DAZ_AI_PAT }}
+          path: daz-ai
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: daz-ai/requirements.txt
+
+      - name: Install dependencies and Japanese fonts
+        working-directory: daz-ai
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+
+      - name: Validate cover pipeline before API use
+        working-directory: daz-ai
+        run: |
+          python -m compileall -q src scripts tests
+          python -m unittest tests.test_cover_art_prompt tests.test_cover_renderer
+
+      - name: Generate Gemini cover art
+        working-directory: daz-ai
+        shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_IMAGE_MODEL: "gemini-3.1-flash-image"
+          GEMINI_IMAGE_ASPECT_RATIO: "2:3"
+          GEMINI_IMAGE_SIZE: "2K"
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
+          FORCE_RUN: ${{ steps.resolve.outputs.force }}
+        run: |
+          set -euo pipefail
+          FORCE_ARG=""
+          if [ "$FORCE_RUN" = "true" ]; then
+            FORCE_ARG="--force"
+          fi
+          python scripts/generate_cover_art_gemini.py "books/$BOOK_ID" $FORCE_ARG
+
+      - name: Build deterministic final cover
+        working-directory: daz-ai
+        shell: bash
+        env:
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
+        run: |
+          set -euo pipefail
+          python scripts/build_cover.py "books/$BOOK_ID"
+
+      - name: Verify cover artifacts
+        working-directory: daz-ai
+        shell: bash
+        env:
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
+        run: |
+          set -euo pipefail
+          PUBLISH="books/$BOOK_ID/publish"
+          for file in             cover-art.png             cover-art-generation.json             cover.jpg             cover-thumb-320.jpg             cover-thumb-200.jpg             cover-thumb-120.jpg             cover-build-manifest.json
+          do
+            test -s "$PUBLISH/$file" || {
+              echo "Missing or empty cover artifact: $PUBLISH/$file"
+              exit 1
+            }
+          done
+
+          python - "$PUBLISH" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          from PIL import Image
+
+          publish = Path(sys.argv[1])
+          with Image.open(publish / "cover-art.png") as art:
+              aw, ah = art.size
+              assert aw < ah, (aw, ah)
+              assert aw >= 700 and ah >= 1000, (aw, ah)
+
+          with Image.open(publish / "cover.jpg") as cover:
+              assert cover.size == (1600, 2560), cover.size
+              assert cover.mode == "RGB", cover.mode
+
+          manifest = json.loads(
+              (publish / "cover-build-manifest.json").read_text(encoding="utf-8")
+          )
+          assert manifest["pipeline_stage"] == "compositor", manifest
+          assert manifest["image_model_output_is_final_cover"] is False, manifest
+          assert manifest["art_layer"] == "cover-art.png", manifest
+          print(f"Cover E2E artifacts verified: art={aw}x{ah}, final=1600x2560")
+          PY
+
+      - name: Commit cover artifacts to private repository
+        working-directory: daz-ai
+        shell: bash
+        env:
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
+        run: |
+          set -euo pipefail
+          git config user.name "kindle-factory-cover-bot"
+          git config user.email "kindle-factory-cover-bot@users.noreply.github.com"
+
+          PUBLISH="books/$BOOK_ID/publish"
+          git add             "$PUBLISH/cover-art.png"             "$PUBLISH/cover-art-generation.json"             "$PUBLISH/cover.jpg"             "$PUBLISH/cover-thumb-320.jpg"             "$PUBLISH/cover-thumb-200.jpg"             "$PUBLISH/cover-thumb-120.jpg"             "$PUBLISH/cover-build-manifest.json"
+
+          if git diff --cached --quiet; then
+            echo "No cover changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Build Gemini cover for $BOOK_ID"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Final repository-state summary
+        working-directory: daz-ai
+        shell: bash
+        env:
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
+        run: |
+          set -euo pipefail
+          echo "COVER_E2E_COMPLETE=$BOOK_ID"
+          git status --short
