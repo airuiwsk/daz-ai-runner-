@@ -1,1 +1,1 @@
-B20260913-103 force=false redesign=typography-rhythm-v2
+B20260913-102 force=false redesign=strict-typography-v3
