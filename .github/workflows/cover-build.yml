@@ -99,12 +99,19 @@ jobs:
           cache: pip
           cache-dependency-path: daz-ai/requirements.txt
 
+      - name: Cache editorial cover fonts
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/fonts/kindle-factory
+          key: cover-fontpack-v1-${{ runner.os }}
+
       - name: Install dependencies and Japanese fonts
         working-directory: daz-ai
         run: |
           pip install -r requirements.txt
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-noto-cjk
+          sudo apt-get install -y -qq fonts-noto-cjk fontconfig curl
+          bash scripts/install_cover_fonts.sh
 
       - name: Validate cover pipeline before API use
         working-directory: daz-ai
