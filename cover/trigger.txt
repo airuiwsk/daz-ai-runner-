@@ -1,1 +1,1 @@
-B20260913-102 force=true redesign=quiet-literary-corpus-v1
+B20260913-103 force=true redesign=speculative-corpus-v1
