@@ -51,7 +51,11 @@ jobs:
               echo "Push trigger commit message must contain a Book ID such as B20260913-102"
               exit 2
             fi
-            FORCE_RUN="true"
+            if printf '%s' "$HEAD_MESSAGE" | grep -q 'force=false'; then
+              FORCE_RUN="false"
+            else
+              FORCE_RUN="true"
+            fi
           fi
           echo "book_id=$BOOK_ID" >> "$GITHUB_OUTPUT"
           echo "force=$FORCE_RUN" >> "$GITHUB_OUTPUT"
