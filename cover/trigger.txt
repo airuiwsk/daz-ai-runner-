@@ -1,1 +1,1 @@
-B20260924-104 force=true redesign=image-feature-v2-absence-edge-tension
+B20260913-102 force=true redesign=quiet-literary-corpus-v1
