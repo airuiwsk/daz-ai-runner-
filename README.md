@@ -59,3 +59,16 @@ See [SETUP.md](SETUP.md).
 - No manuscript artifacts are uploaded to this public repository
 - No secret values are printed or committed
 - Do not use `pull_request_target`
+
+
+## Cover build
+
+`Gemini Cover Build Runner` checks out the private `airuiwsk/daz-ai` repository, reads the canonical `publish/cover-spec.json`, generates a positive-description art prompt, calls `gemini-3.1-flash-image`, saves `publish/cover-art.png`, runs the deterministic compositor, verifies all cover artifacts, and commits them directly back to the private repository.
+
+Manual run:
+
+- Actions → Gemini Cover Build Runner → Run workflow
+- `book_id`: for example `B20260924-104`
+- `force`: regenerate even when the prompt/model hash is unchanged
+
+Required secrets are the existing `GEMINI_API_KEY` and `DAZ_AI_PAT`. Gemini image-generation models require a Paid Tier API project; a Free Tier key returns quota limit 0 for image generation.
