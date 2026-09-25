@@ -39,13 +39,18 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_BOOK_ID: ${{ inputs.book_id }}
           INPUT_FORCE: ${{ inputs.force }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             BOOK_ID="$INPUT_BOOK_ID"
             FORCE_RUN="$INPUT_FORCE"
           else
-            BOOK_ID="B20260924-104"
+            BOOK_ID="$(printf '%s' "$HEAD_MESSAGE" | grep -oE 'B[0-9]{8}-[0-9]{3}' | head -1 || true)"
+            if [ -z "$BOOK_ID" ]; then
+              echo "Push trigger commit message must contain a Book ID such as B20260913-102"
+              exit 2
+            fi
             FORCE_RUN="true"
           fi
           echo "book_id=$BOOK_ID" >> "$GITHUB_OUTPUT"
