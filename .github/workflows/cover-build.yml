@@ -110,7 +110,7 @@ jobs:
         run: |
           pip install -r requirements.txt
           sudo apt-get update -qq
-          sudo apt-get install -y -qq fonts-noto-cjk fontconfig curl
+          sudo apt-get install -y -qq fonts-noto-cjk fontconfig curl libraqm0
           bash scripts/install_cover_fonts.sh
 
       - name: Validate cover pipeline before API use
