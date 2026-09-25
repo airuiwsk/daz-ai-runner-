@@ -103,6 +103,15 @@ jobs:
           python -m compileall -q src scripts tests
           python -m unittest tests.test_cover_art_prompt tests.test_cover_renderer
 
+      - name: Select nearest professional cover references
+        working-directory: daz-ai
+        shell: bash
+        env:
+          BOOK_ID: ${{ steps.resolve.outputs.book_id }}
+        run: |
+          set -euo pipefail
+          python scripts/select_cover_references.py "books/$BOOK_ID" --count 12
+
       - name: Generate Gemini cover art
         working-directory: daz-ai
         shell: bash
@@ -138,7 +147,7 @@ jobs:
         run: |
           set -euo pipefail
           PUBLISH="books/$BOOK_ID/publish"
-          for file in             cover-art.png             cover-art-generation.json             cover.jpg             cover-thumb-320.jpg             cover-thumb-200.jpg             cover-thumb-120.jpg             cover-build-manifest.json
+          for file in             cover-reference-selection.json             cover-art.png             cover-art-generation.json             cover.jpg             cover-thumb-320.jpg             cover-thumb-200.jpg             cover-thumb-120.jpg             cover-build-manifest.json
           do
             test -s "$PUBLISH/$file" || {
               echo "Missing or empty cover artifact: $PUBLISH/$file"
@@ -182,7 +191,7 @@ jobs:
           git config user.email "kindle-factory-cover-bot@users.noreply.github.com"
 
           PUBLISH="books/$BOOK_ID/publish"
-          git add             "$PUBLISH/cover-art.png"             "$PUBLISH/cover-art-generation.json"             "$PUBLISH/cover.jpg"             "$PUBLISH/cover-thumb-320.jpg"             "$PUBLISH/cover-thumb-200.jpg"             "$PUBLISH/cover-thumb-120.jpg"             "$PUBLISH/cover-build-manifest.json"
+          git add             "$PUBLISH/cover-reference-selection.json"             "$PUBLISH/cover-art.png"             "$PUBLISH/cover-art-generation.json"             "$PUBLISH/cover.jpg"             "$PUBLISH/cover-thumb-320.jpg"             "$PUBLISH/cover-thumb-200.jpg"             "$PUBLISH/cover-thumb-120.jpg"             "$PUBLISH/cover-build-manifest.json"
 
           if git diff --cached --quiet; then
             echo "No cover changes to commit."
