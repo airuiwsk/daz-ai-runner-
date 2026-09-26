@@ -1,0 +1,137 @@
+name: LLM Control Pairwise Critic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/llm-control-critic.yml"
+      - "validation/llm-control-critic-trigger.txt"
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Private daz-ai eval run id"
+        required: true
+        default: "36246449738"
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  critic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TARGET_RUN_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.run_id || '36246449738' }}
+
+    steps:
+      - name: Checkout runner repository
+        uses: actions/checkout@v7
+        with:
+          path: runner
+
+      - name: Verify required secrets
+        shell: bash
+        env:
+          DAZ_AI_PAT: ${{ secrets.DAZ_AI_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DAZ_AI_PAT" || { echo "DAZ_AI_PAT is missing"; exit 1; }
+          test -n "$GEMINI_API_KEY" || { echo "GEMINI_API_KEY is missing"; exit 1; }
+
+      - name: Checkout private research repository
+        uses: actions/checkout@v7
+        with:
+          repository: airuiwsk/daz-ai
+          ref: main
+          token: ${{ secrets.DAZ_AI_PAT }}
+          path: daz-ai
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: daz-ai/requirements.txt
+
+      - name: Install dependencies
+        working-directory: daz-ai
+        run: pip install -r requirements.txt
+
+      - name: Run order-reversed pairwise critic
+        id: critic
+        working-directory: daz-ai
+        shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set +e
+          RUN_DIR="research/llm-narrative-control/eval-runs/gemini-smoke/$TARGET_RUN_ID"
+          python research/llm-narrative-control/harness/run_pairwise_critic.py "$RUN_DIR"
+          CODE=$?
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Persist private critic result
+        working-directory: daz-ai
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_DIR="research/llm-narrative-control/eval-runs/gemini-smoke/$TARGET_RUN_ID"
+          if [ ! -f "$RUN_DIR/pairwise-critic.json" ]; then
+            echo "No pairwise critic file."
+            exit 0
+          fi
+          git config user.name "kindle-factory-research-bot"
+          git config user.email "kindle-factory-research-bot@users.noreply.github.com"
+          git add "$RUN_DIR/pairwise-critic.json"
+          if git diff --cached --quiet; then
+            echo "No critic changes."
+            exit 0
+          fi
+          git commit -m "Record pairwise critic for LLM control run $TARGET_RUN_ID"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Write non-sensitive critic status
+        if: always()
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.critic.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          FILE="daz-ai/research/llm-narrative-control/eval-runs/gemini-smoke/$TARGET_RUN_ID/pairwise-critic.json"
+          PAIRS="0"
+          if [ -f "$FILE" ]; then
+            PAIRS="$(python -c 'import json,sys; print(len(json.load(open(sys.argv[1])).get("results",[])))' "$FILE")"
+          fi
+          mkdir -p runner/validation
+          {
+            echo "# LLM Control Pairwise Critic"
+            echo
+            echo "- Target run: `$TARGET_RUN_ID`"
+            echo "- Pair records produced: **$PAIRS**"
+            echo "- Critic exit code: `${EXIT_CODE:-not-run}`"
+            echo
+            echo "No candidate prose or prompts are stored in this public file."
+          } > runner/validation/llm-control-critic-latest.md
+
+      - name: Commit public critic status
+        if: always()
+        working-directory: runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kindle-factory-research-status"
+          git config user.email "kindle-factory-research-status@users.noreply.github.com"
+          git add validation/llm-control-critic-latest.md
+          if git diff --cached --quiet; then
+            echo "No status change."
+          else
+            git commit -m "Record LLM control critic status"
+            git push origin HEAD:main
+          fi
