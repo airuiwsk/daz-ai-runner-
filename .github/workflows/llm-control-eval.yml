@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: llm-control-gemini-research-eval
@@ -21,6 +21,11 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      - name: Checkout runner repository
+        uses: actions/checkout@v7
+        with:
+          path: runner
+
       - name: Verify required secrets
         shell: bash
         env:
@@ -114,11 +119,49 @@ jobs:
           git pull --rebase origin main
           git push origin HEAD:main
 
-      - name: Report generation status
+      - name: Write non-sensitive runner status
         if: always()
         shell: bash
         env:
+          RUN_ID: ${{ github.run_id }}
           EXIT_CODE: ${{ steps.generate.outputs.exit_code }}
         run: |
-          echo "Generation exit code: ${EXIT_CODE:-not-run}"
-          echo "Research outputs, if any, were written only to private airuiwsk/daz-ai."
+          set -euo pipefail
+          RUN_DIR="daz-ai/research/llm-narrative-control/eval-runs/gemini-smoke/$RUN_ID"
+          STATUS="NO_OUTPUT"
+          OK_COUNT="0"
+          PLANNED_COUNT="12"
+          if [ -f "$RUN_DIR/summary.json" ]; then
+            STATUS="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("status","unknown"))' "$RUN_DIR/summary.json")"
+            OK_COUNT="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("ok_count",0))' "$RUN_DIR/summary.json")"
+            PLANNED_COUNT="$(python -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("planned_count",12))' "$RUN_DIR/summary.json")"
+          fi
+          mkdir -p runner/validation
+          {
+            echo "# LLM Control Research Eval"
+            echo
+            echo "- Run ID: `$RUN_ID`"
+            echo "- Private input SHA: `$(git -C daz-ai rev-parse HEAD)`"
+            echo "- Generation status: **$STATUS**"
+            echo "- Completed outputs: **$OK_COUNT / $PLANNED_COUNT**"
+            echo "- Generation exit code: `${EXIT_CODE:-not-run}`"
+            echo "- Model target: `gemini-3.8-flash`"
+            echo
+            echo "No manuscript, generated prose, prompt text, API key, or private credential is stored in this public status file."
+          } > runner/validation/llm-control-latest.md
+
+      - name: Commit runner status
+        if: always()
+        working-directory: runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "kindle-factory-research-status"
+          git config user.email "kindle-factory-research-status@users.noreply.github.com"
+          git add validation/llm-control-latest.md
+          if git diff --cached --quiet; then
+            echo "No status change."
+          else
+            git commit -m "Record LLM control research eval status"
+            git push origin HEAD:main
+          fi
