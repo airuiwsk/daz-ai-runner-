@@ -1,0 +1,124 @@
+name: LLM Control Gemini Research Eval
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/llm-control-eval.yml"
+      - "validation/llm-control-trigger.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llm-control-gemini-research-eval
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Verify required secrets
+        shell: bash
+        env:
+          DAZ_AI_PAT: ${{ secrets.DAZ_AI_PAT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DAZ_AI_PAT" || { echo "DAZ_AI_PAT is missing"; exit 1; }
+          test -n "$GEMINI_API_KEY" || { echo "GEMINI_API_KEY is missing"; exit 1; }
+
+      - name: Checkout private research repository
+        uses: actions/checkout@v7
+        with:
+          repository: airuiwsk/daz-ai
+          ref: main
+          token: ${{ secrets.DAZ_AI_PAT }}
+          path: daz-ai
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: daz-ai/requirements.txt
+
+      - name: Install dependencies
+        working-directory: daz-ai
+        run: pip install -r requirements.txt
+
+      - name: Validate research harness
+        working-directory: daz-ai
+        run: python research/llm-narrative-control/harness/validate_research_harness.py
+
+      - name: Run isolated Gemini 3.8 N=1 evaluation
+        id: generate
+        working-directory: daz-ai
+        shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set +e
+          python research/llm-narrative-control/harness/run_gemini_eval.py
+          CODE=$?
+          echo "exit_code=$CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Analyze generated outputs
+        working-directory: daz-ai
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          RUN_DIR="research/llm-narrative-control/eval-runs/gemini-smoke/$RUN_ID"
+          if [ -f "$RUN_DIR/summary.json" ]; then
+            python research/llm-narrative-control/harness/analyze_eval_outputs.py "$RUN_DIR"
+          fi
+          if [ -f "$RUN_DIR/analysis-summary.json" ]; then
+            python research/llm-narrative-control/harness/summarize_eval_diagnostics.py "$RUN_DIR"
+          fi
+
+      - name: Persist research outputs to private repository
+        working-directory: daz-ai
+        if: always()
+        shell: bash
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          RUN_DIR="research/llm-narrative-control/eval-runs/gemini-smoke/$RUN_ID"
+          if [ ! -d "$RUN_DIR" ]; then
+            echo "No eval run directory was produced."
+            exit 0
+          fi
+
+          git config user.name "kindle-factory-research-bot"
+          git config user.email "kindle-factory-research-bot@users.noreply.github.com"
+          git add "$RUN_DIR"
+
+          if git diff --cached --quiet; then
+            echo "No research output changes to commit."
+            exit 0
+          fi
+
+          git commit -m "Record Gemini 3.8 LLM control smoke run $RUN_ID"
+          git pull --rebase origin main
+          git push origin HEAD:main
+
+      - name: Report generation status
+        if: always()
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.generate.outputs.exit_code }}
+        run: |
+          echo "Generation exit code: ${EXIT_CODE:-not-run}"
+          echo "Research outputs, if any, were written only to private airuiwsk/daz-ai."
